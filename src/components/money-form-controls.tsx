@@ -1,3 +1,4 @@
+import type { ComponentProps } from "react";
 import { currencyCodes } from "@/lib/currencies";
 
 type CurrencySelectProps = {
@@ -27,14 +28,16 @@ export function CurrencySelect({
 export function FundingModeSelect({
   name = "fundingMode",
   defaultValue = "manual",
+  ...selectProps
 }: {
   name?: string;
   defaultValue?: string;
-}) {
+} & Omit<ComponentProps<"select">, "children" | "name" | "defaultValue">) {
   return (
     <select
       name={name}
       defaultValue={defaultValue}
+      {...selectProps}
       className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
     >
       <option value="manual">Manual</option>
@@ -46,20 +49,19 @@ export function FundingModeSelect({
 
 export function AccountScopeSelect({
   accounts,
-  id,
   name = "accountId",
   defaultValue = "",
+  ...selectProps
 }: {
   accounts: { id: string; name: string }[];
-  id?: string;
   name?: string;
   defaultValue?: string;
-}) {
+} & Omit<ComponentProps<"select">, "children" | "name" | "defaultValue">) {
   return (
     <select
-      id={id}
       name={name}
       defaultValue={defaultValue}
+      {...selectProps}
       className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
     >
       <option value="">Personal savings</option>

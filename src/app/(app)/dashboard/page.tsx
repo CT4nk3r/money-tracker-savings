@@ -10,21 +10,29 @@ import { formatMoney } from "@/lib/money";
 export default async function DashboardPage() {
   const clerkUserId = await requireUserId();
   const data = await getDashboardData(clerkUserId);
-  const displayBalances = await Promise.all(
-    data.balances.map(async (balance) => {
-      if (balance.currency === data.settings.displayCurrency) {
-        return balance.amountMinor;
-      }
+  const displayBalanceGroups = await Promise.all(
+    data.balanceGroups.map(async (group) => {
+      const displayBalances = await Promise.all(
+        group.balances.map(async (balance) => {
+          if (balance.currency === data.settings.displayCurrency) {
+            return balance.amountMinor;
+          }
 
-      const converted = await convertWithRateSnapshot(
-        balance.amountMinor,
-        balance.currency,
-        data.settings.displayCurrency,
+          const converted = await convertWithRateSnapshot(
+            balance.amountMinor,
+            balance.currency,
+            data.settings.displayCurrency,
+          );
+          return converted.amountMinor;
+        }),
       );
-      return converted.amountMinor;
+
+      return {
+        ...group,
+        totalDisplayMinor: displayBalances.reduce((sum, amount) => sum + amount, 0),
+      };
     }),
   );
-  const totalDisplayMinor = displayBalances.reduce((sum, amount) => sum + amount, 0);
 
   return (
     <div className="grid gap-6 pb-20 md:pb-0">
@@ -38,23 +46,37 @@ export default async function DashboardPage() {
         <div className="grid gap-4">
           <Card>
             <CardHeader>
-              <CardTitle>Total Unallocated Savings</CardTitle>
+              <CardTitle>Unallocated Savings</CardTitle>
             </CardHeader>
-            <CardContent className="grid gap-4">
-              <div className="text-4xl font-semibold">
-                {formatMoney(totalDisplayMinor, data.settings.displayCurrency)}
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {data.balances.length ? (
-                  data.balances.map((balance) => (
-                    <Badge key={balance.currency} variant="secondary">
-                      {formatMoney(balance.amountMinor, balance.currency)}
-                    </Badge>
-                  ))
-                ) : (
-                  <span className="text-sm text-muted-foreground">No savings deposited yet.</span>
-                )}
-              </div>
+            <CardContent className="grid gap-5">
+              {displayBalanceGroups.map((group) => (
+                <div key={group.id} className="grid gap-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium">{group.name}</span>
+                      {group.type === "joint" ? (
+                        <Badge variant="outline">Joint</Badge>
+                      ) : null}
+                    </div>
+                    <span className="text-lg font-semibold">
+                      {formatMoney(group.totalDisplayMinor, data.settings.displayCurrency)}
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {group.balances.length ? (
+                      group.balances.map((balance) => (
+                        <Badge key={balance.currency} variant="secondary">
+                          {formatMoney(balance.amountMinor, balance.currency)}
+                        </Badge>
+                      ))
+                    ) : (
+                      <span className="text-sm text-muted-foreground">
+                        No unallocated savings here.
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ))}
             </CardContent>
           </Card>
           <div className="grid gap-4 xl:grid-cols-2">

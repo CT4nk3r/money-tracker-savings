@@ -15,6 +15,13 @@
       "when": 1780417438531,
       "tag": "0001_useful_tattoo",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1780421843709,
+      "tag": "0002_nervous_dragon_man",
+      "breakpoints": true
     }
   ]
 }

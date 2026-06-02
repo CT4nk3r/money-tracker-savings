@@ -1,0 +1,2 @@
+CREATE UNIQUE INDEX "account_invites_pending_email_unique" ON "savings_account_invites" USING btree ("account_id","invited_email") WHERE "savings_account_invites"."status" = 'pending';--> statement-breakpoint
+CREATE UNIQUE INDEX "account_members_account_user_unique" ON "savings_account_members" USING btree ("account_id","clerk_user_id");

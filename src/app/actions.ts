@@ -1,5 +1,6 @@
 "use server";
 
+import { randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { and, eq } from "drizzle-orm";
 import { currentUser } from "@clerk/nextjs/server";
@@ -18,6 +19,10 @@ import {
 } from "@/db/schema";
 import { isCurrencyCode } from "@/lib/currencies";
 import {
+  getPrimaryVerifiedEmailAddress,
+  getVerifiedEmailAddresses,
+} from "@/lib/clerk-user";
+import {
   assertGoalOwner,
   assertSavingsAccountMember,
   assertWishlistOwner,
@@ -34,6 +39,7 @@ import { planWishlistFunding } from "@/lib/wishlist-planner";
 const currencySchema = z.string().refine(isCurrencyCode, "Unsupported currency.");
 const fundingModeSchema = z.enum(["manual", "top_first", "weighted_split"]);
 const emailSchema = z.email().transform((email) => email.toLowerCase());
+const accountIdSchema = z.uuid();
 
 function stringValue(formData: FormData, key: string) {
   return String(formData.get(key) ?? "").trim();
@@ -47,7 +53,8 @@ function revalidateApp() {
 }
 
 function optionalAccountId(formData: FormData) {
-  return stringValue(formData, "accountId") || null;
+  const accountId = stringValue(formData, "accountId");
+  return accountId ? accountIdSchema.parse(accountId) : null;
 }
 
 async function createWishlistAllocation(
@@ -394,33 +401,41 @@ export async function createSavingsAccount(formData: FormData) {
   const user = await currentUser();
   const name = stringValue(formData, "name");
   const invitedEmail = emailSchema.parse(stringValue(formData, "invitedEmail"));
+  const ownerEmail = getPrimaryVerifiedEmailAddress(user);
 
   if (!name) {
     throw new Error("Account name is required.");
   }
 
+  if (!ownerEmail) {
+    throw new Error("A verified email address is required before creating a joint account.");
+  }
+
+  if (invitedEmail === ownerEmail) {
+    throw new Error("Invite a different verified email address.");
+  }
+
   const db = getDb();
-  const [account] = await db
-    .insert(savingsAccounts)
-    .values({ name, createdByClerkUserId: clerkUserId })
-    .returning();
+  const accountId = randomUUID();
 
-  const primaryEmail =
-    user?.emailAddresses.find((email) => email.id === user.primaryEmailAddressId)
-      ?.emailAddress ?? user?.emailAddresses[0]?.emailAddress;
-
-  await db.insert(savingsAccountMembers).values({
-    accountId: account.id,
-    clerkUserId,
-    email: primaryEmail?.toLowerCase() ?? null,
-    role: "owner",
-  });
-
-  await db.insert(savingsAccountInvites).values({
-    accountId: account.id,
-    invitedEmail,
-    invitedByClerkUserId: clerkUserId,
-  });
+  await db.batch([
+    db.insert(savingsAccounts).values({
+      id: accountId,
+      name,
+      createdByClerkUserId: clerkUserId,
+    }),
+    db.insert(savingsAccountMembers).values({
+      accountId,
+      clerkUserId,
+      email: ownerEmail,
+      role: "owner",
+    }),
+    db.insert(savingsAccountInvites).values({
+      accountId,
+      invitedEmail,
+      invitedByClerkUserId: clerkUserId,
+    }),
+  ]);
 
   revalidateApp();
 }
@@ -429,8 +444,7 @@ export async function acceptSavingsAccountInvite(formData: FormData) {
   const clerkUserId = await requireUserId();
   const user = await currentUser();
   const inviteId = stringValue(formData, "inviteId");
-  const emails =
-    user?.emailAddresses.map((email) => email.emailAddress.toLowerCase()) ?? [];
+  const emails = getVerifiedEmailAddresses(user);
 
   const db = getDb();
   const [invite] = await db
@@ -443,22 +457,26 @@ export async function acceptSavingsAccountInvite(formData: FormData) {
     throw new Error("Invite not found for this account.");
   }
 
-  await db.insert(savingsAccountMembers).values({
-    accountId: invite.accountId,
-    clerkUserId,
-    email: invite.invitedEmail,
-    role: "member",
-  });
-
-  await db
-    .update(savingsAccountInvites)
-    .set({
-      status: "accepted",
-      acceptedByClerkUserId: clerkUserId,
-      acceptedAt: new Date(),
-      updatedAt: new Date(),
-    })
-    .where(eq(savingsAccountInvites.id, invite.id));
+  await db.batch([
+    db
+      .insert(savingsAccountMembers)
+      .values({
+        accountId: invite.accountId,
+        clerkUserId,
+        email: invite.invitedEmail,
+        role: "member",
+      })
+      .onConflictDoNothing(),
+    db
+      .update(savingsAccountInvites)
+      .set({
+        status: "accepted",
+        acceptedByClerkUserId: clerkUserId,
+        acceptedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(and(eq(savingsAccountInvites.id, invite.id), eq(savingsAccountInvites.status, "pending"))),
+  ]);
 
   revalidateApp();
 }

@@ -1,3 +1,6 @@
+"use client";
+
+import { useState } from "react";
 import { createDeposit } from "@/app/actions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -16,6 +19,9 @@ export function DepositForm({
   accounts: { id: string; name: string }[];
   defaultFundingMode: string;
 }) {
+  const [accountId, setAccountId] = useState("");
+  const isJointDeposit = accountId.length > 0;
+
   return (
     <Card>
       <CardHeader>
@@ -32,11 +38,28 @@ export function DepositForm({
           </div>
           <div className="grid gap-2">
             <Label htmlFor="deposit-mode">Wishlist funding</Label>
-            <FundingModeSelect defaultValue={defaultFundingMode} />
+            {isJointDeposit ? (
+              <input type="hidden" name="fundingMode" value="manual" />
+            ) : null}
+            <FundingModeSelect
+              key={isJointDeposit ? "joint-manual" : "personal-funding"}
+              defaultValue={isJointDeposit ? "manual" : defaultFundingMode}
+              disabled={isJointDeposit}
+            />
+            {isJointDeposit ? (
+              <p className="text-xs text-muted-foreground">
+                Joint account deposits stay unallocated until you assign them to a shared goal.
+              </p>
+            ) : null}
           </div>
           <div className="grid gap-2">
             <Label htmlFor="deposit-account">Saving space</Label>
-            <AccountScopeSelect id="deposit-account" accounts={accounts} />
+            <AccountScopeSelect
+              id="deposit-account"
+              accounts={accounts}
+              value={accountId}
+              onChange={(event) => setAccountId(event.currentTarget.value)}
+            />
           </div>
           <div className="grid gap-2">
             <Label htmlFor="deposit-note">Note</Label>

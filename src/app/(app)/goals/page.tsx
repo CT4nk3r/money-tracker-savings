@@ -13,6 +13,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { getVerifiedEmailAddresses } from "@/lib/clerk-user";
 import {
   getGoalsView,
   getPendingSavingsInvitesForEmails,
@@ -23,7 +24,7 @@ import {
 export default async function GoalsPage() {
   const clerkUserId = await requireUserId();
   const user = await currentUser();
-  const emails = user?.emailAddresses.map((email) => email.emailAddress) ?? [];
+  const emails = getVerifiedEmailAddresses(user);
   const [goals, accounts, invites] = await Promise.all([
     getGoalsView(clerkUserId),
     getSavingsAccountsForUser(clerkUserId),

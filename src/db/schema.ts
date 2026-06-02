@@ -7,8 +7,10 @@ import {
   pgTable,
   text,
   timestamp,
+  uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 export const fundingModeEnum = pgEnum("funding_mode", [
   "manual",
@@ -118,6 +120,10 @@ export const savingsAccountMembers = pgTable(
   (table) => [
     index("account_members_account_idx").on(table.accountId),
     index("account_members_user_idx").on(table.clerkUserId),
+    uniqueIndex("account_members_account_user_unique").on(
+      table.accountId,
+      table.clerkUserId,
+    ),
   ],
 );
 
@@ -138,6 +144,9 @@ export const savingsAccountInvites = pgTable(
   (table) => [
     index("account_invites_account_idx").on(table.accountId),
     index("account_invites_email_idx").on(table.invitedEmail, table.status),
+    uniqueIndex("account_invites_pending_email_unique")
+      .on(table.accountId, table.invitedEmail)
+      .where(sql`${table.status} = 'pending'`),
   ],
 );
 

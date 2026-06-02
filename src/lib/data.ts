@@ -186,18 +186,20 @@ export async function getUnallocatedBalances(
   accountId?: string | null,
 ) {
   const db = getDb();
-  const accountIds =
-    accountId === undefined
-      ? await getAccessibleAccountIds(clerkUserId)
-      : accountId
-        ? [accountId]
-        : [];
-  const filter =
-    accountId === null
+
+  if (accountId) {
+    await assertSavingsAccountMember(clerkUserId, accountId);
+  }
+
+  const accountIds = accountId === undefined ? await getAccessibleAccountIds(clerkUserId) : [];
+  const filter = accountId
+    ? eq(savingsTransactions.accountId, accountId)
+    : accountId === null
       ? and(eq(savingsTransactions.clerkUserId, clerkUserId), isNull(savingsTransactions.accountId))
       : accessibleAccountFilter(clerkUserId, accountIds, savingsTransactions);
-  const goalFilter =
-    accountId === null
+  const goalFilter = accountId
+    ? eq(goalAllocations.accountId, accountId)
+    : accountId === null
       ? and(eq(goalAllocations.clerkUserId, clerkUserId), isNull(goalAllocations.accountId))
       : accessibleAccountFilter(clerkUserId, accountIds, goalAllocations);
   const [transactions, goalFunds, wishlistFunds] = await Promise.all([
@@ -209,12 +211,12 @@ export async function getUnallocatedBalances(
       .select()
       .from(goalAllocations)
       .where(goalFilter),
-    accountId
+    accountId !== undefined
       ? Promise.resolve([])
       : db
           .select()
           .from(wishlistAllocations)
-          .where(eq(wishlistAllocations.clerkUserId, clerkUserId)),
+      .where(eq(wishlistAllocations.clerkUserId, clerkUserId)),
   ]);
 
   const balances = new Map<string, number>();
@@ -243,6 +245,29 @@ export async function getUnallocatedBalances(
     .sort((a, b) => a.currency.localeCompare(b.currency));
 }
 
+export async function getUnallocatedBalanceGroups(clerkUserId: string) {
+  const accounts = await getSavingsAccountsForUser(clerkUserId);
+  const [personal, ...jointBalances] = await Promise.all([
+    getUnallocatedBalances(clerkUserId, null),
+    ...accounts.map((account) => getUnallocatedBalances(clerkUserId, account.id)),
+  ]);
+
+  return [
+    {
+      id: "personal",
+      name: "Personal savings",
+      type: "personal" as const,
+      balances: personal,
+    },
+    ...accounts.map((account, index) => ({
+      id: account.id,
+      name: account.name,
+      type: "joint" as const,
+      balances: jointBalances[index] ?? [],
+    })),
+  ];
+}
+
 export async function getRecentTransactions(clerkUserId: string) {
   const accountIds = await getAccessibleAccountIds(clerkUserId);
 
@@ -255,10 +280,10 @@ export async function getRecentTransactions(clerkUserId: string) {
 }
 
 export async function getDashboardData(clerkUserId: string) {
-  const [settings, accounts, balances, goalRows, wishlistRows, transactions] = await Promise.all([
+  const [settings, accounts, balanceGroups, goalRows, wishlistRows, transactions] = await Promise.all([
     getOrCreateSettings(clerkUserId),
     getSavingsAccountsForUser(clerkUserId),
-    getUnallocatedBalances(clerkUserId),
+    getUnallocatedBalanceGroups(clerkUserId),
     getGoalsView(clerkUserId),
     getWishlistView(clerkUserId),
     getRecentTransactions(clerkUserId),
@@ -267,7 +292,7 @@ export async function getDashboardData(clerkUserId: string) {
   return {
     settings,
     accounts,
-    balances,
+    balanceGroups,
     goals: goalRows.filter((goal) => goal.status === "active").slice(0, 4),
     wishlist: wishlistRows
       .filter((item) => item.status === "active" || item.status === "ready")
