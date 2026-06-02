@@ -1,12 +1,12 @@
 import {
-  allocateToWishlist,
-  createWishlistItem,
-  purchaseWishlistItem,
-  updateWishlistPrice,
+  allocateToWishlistFormAction,
+  createWishlistItemFormAction,
+  purchaseWishlistItemFormAction,
+  updateWishlistPriceFormAction,
 } from "@/app/actions";
+import { ActionForm, ActionSubmitButton } from "@/components/action-form";
 import { CurrencySelect } from "@/components/money-form-controls";
 import { ProgressSummary } from "@/components/progress-summary";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -32,7 +32,7 @@ export default async function WishlistPage() {
             <CardTitle>New Wishlist Item</CardTitle>
           </CardHeader>
           <CardContent>
-            <form action={createWishlistItem} className="grid gap-4">
+            <ActionForm action={createWishlistItemFormAction} className="grid gap-4">
               <div className="grid gap-2">
                 <Label htmlFor="wishlist-title">Title</Label>
                 <Input id="wishlist-title" name="title" required placeholder="Hotel in Vienna" />
@@ -63,8 +63,10 @@ export default async function WishlistPage() {
                 <Label htmlFor="wishlist-notes">Notes</Label>
                 <Textarea id="wishlist-notes" name="notes" rows={3} />
               </div>
-              <Button type="submit">Add item</Button>
-            </form>
+              <ActionSubmitButton type="submit" pendingLabel="Adding...">
+                Add item
+              </ActionSubmitButton>
+            </ActionForm>
           </CardContent>
         </Card>
         <div className="grid gap-4">
@@ -84,38 +86,51 @@ export default async function WishlistPage() {
                       Original price: {formatMoney(item.originalPriceMinor, item.currency)}
                     </div>
                   ) : null}
-                  <div className="grid gap-3 xl:grid-cols-3">
-                    <form action={allocateToWishlist} className="grid gap-3">
-                      <input type="hidden" name="wishlistItemId" value={item.id} />
-                      <Input name="amount" inputMode="decimal" required placeholder="Allocate" />
-                      <CurrencySelect />
-                      <Button type="submit">Allocate</Button>
-                    </form>
-                    <form action={updateWishlistPrice} className="grid gap-3">
-                      <input type="hidden" name="wishlistItemId" value={item.id} />
-                      <Input
-                        name="currentPrice"
-                        inputMode="decimal"
-                        required
-                        placeholder="New price"
-                      />
-                      <Button type="submit" variant="outline">
-                        Update price
-                      </Button>
-                    </form>
-                    <form action={purchaseWishlistItem} className="grid content-end">
-                      <input type="hidden" name="wishlistItemId" value={item.id} />
-                      <Button
-                        type="submit"
-                        disabled={
-                          item.savedAmountMinor < item.currentPriceMinor ||
-                          item.status === "purchased"
-                        }
-                      >
-                        Mark purchased
-                      </Button>
-                    </form>
-                  </div>
+                  {item.status === "purchased" ? null : (
+                    <div className="grid gap-3 xl:grid-cols-3">
+                      {item.savedAmountMinor < item.currentPriceMinor ? (
+                        <ActionForm action={allocateToWishlistFormAction} className="grid gap-3">
+                          <input type="hidden" name="wishlistItemId" value={item.id} />
+                          <Input
+                            name="amount"
+                            inputMode="decimal"
+                            required
+                            placeholder="Allocate"
+                          />
+                          <CurrencySelect />
+                          <ActionSubmitButton type="submit" pendingLabel="Allocating...">
+                            Allocate
+                          </ActionSubmitButton>
+                        </ActionForm>
+                      ) : null}
+                      <ActionForm action={updateWishlistPriceFormAction} className="grid gap-3">
+                        <input type="hidden" name="wishlistItemId" value={item.id} />
+                        <Input
+                          name="currentPrice"
+                          inputMode="decimal"
+                          required
+                          placeholder="New price"
+                        />
+                        <ActionSubmitButton
+                          type="submit"
+                          variant="outline"
+                          pendingLabel="Updating..."
+                        >
+                          Update price
+                        </ActionSubmitButton>
+                      </ActionForm>
+                      <ActionForm action={purchaseWishlistItemFormAction} className="grid content-start">
+                        <input type="hidden" name="wishlistItemId" value={item.id} />
+                        <ActionSubmitButton
+                          type="submit"
+                          disabled={item.savedAmountMinor < item.currentPriceMinor}
+                          pendingLabel="Purchasing..."
+                        >
+                          Mark purchased
+                        </ActionSubmitButton>
+                      </ActionForm>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             ))

@@ -1,14 +1,15 @@
 import { currentUser } from "@clerk/nextjs/server";
 import {
-  acceptSavingsAccountInvite,
-  allocateToGoal,
-  createGoal,
-  createSavingsAccount,
+  acceptSavingsAccountInviteFormAction,
+  allocateToGoalFormAction,
+  completeGoalFormAction,
+  createGoalFormAction,
+  createSavingsAccountFormAction,
 } from "@/app/actions";
+import { ActionForm, ActionSubmitButton } from "@/components/action-form";
 import { AccountScopeSelect, CurrencySelect } from "@/components/money-form-controls";
 import { ProgressSummary } from "@/components/progress-summary";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -47,7 +48,7 @@ export default async function GoalsPage() {
               <CardTitle>New Goal</CardTitle>
             </CardHeader>
             <CardContent>
-              <form action={createGoal} className="grid gap-4">
+              <ActionForm action={createGoalFormAction} className="grid gap-4">
                 <div className="grid gap-2">
                   <Label htmlFor="goal-name">Name</Label>
                   <Input id="goal-name" name="name" required placeholder="Summer flight" />
@@ -67,8 +68,10 @@ export default async function GoalsPage() {
                   <Label htmlFor="goal-notes">Notes</Label>
                   <Textarea id="goal-notes" name="notes" rows={3} />
                 </div>
-                <Button type="submit">Create goal</Button>
-              </form>
+                <ActionSubmitButton type="submit" pendingLabel="Creating...">
+                  Create goal
+                </ActionSubmitButton>
+              </ActionForm>
             </CardContent>
           </Card>
           <Card>
@@ -76,7 +79,7 @@ export default async function GoalsPage() {
               <CardTitle>Joint Accounts</CardTitle>
             </CardHeader>
             <CardContent className="grid gap-5">
-              <form action={createSavingsAccount} className="grid gap-3">
+              <ActionForm action={createSavingsAccountFormAction} className="grid gap-3">
                 <div className="grid gap-2">
                   <Label htmlFor="joint-name">Account name</Label>
                   <Input id="joint-name" name="name" required placeholder="Trip together" />
@@ -91,8 +94,10 @@ export default async function GoalsPage() {
                     placeholder="partner@example.com"
                   />
                 </div>
-                <Button type="submit">Create and invite</Button>
-              </form>
+                <ActionSubmitButton type="submit" pendingLabel="Creating...">
+                  Create and invite
+                </ActionSubmitButton>
+              </ActionForm>
               <div className="grid gap-2">
                 {accounts.length ? (
                   accounts.map((account) => (
@@ -113,19 +118,19 @@ export default async function GoalsPage() {
               {invites.length ? (
                 <div className="grid gap-2">
                   {invites.map((invite) => (
-                    <form
+                    <ActionForm
                       key={invite.id}
-                      action={acceptSavingsAccountInvite}
+                      action={acceptSavingsAccountInviteFormAction}
                       className="flex items-center justify-between gap-3 rounded-md border px-3 py-2 text-sm"
                     >
                       <input type="hidden" name="inviteId" value={invite.id} />
                       <span>
                         Invitation to <span className="font-medium">{invite.accountName}</span>
                       </span>
-                      <Button size="sm" type="submit">
+                      <ActionSubmitButton size="sm" type="submit" pendingLabel="Accepting...">
                         Accept
-                      </Button>
-                    </form>
+                      </ActionSubmitButton>
+                    </ActionForm>
                   ))}
                 </div>
               ) : null}
@@ -149,12 +154,39 @@ export default async function GoalsPage() {
                     currency={goal.currency}
                     status={goal.status}
                   />
-                  <form action={allocateToGoal} className="grid gap-3 sm:grid-cols-[1fr_auto_auto]">
-                    <input type="hidden" name="goalId" value={goal.id} />
-                    <Input name="amount" inputMode="decimal" required placeholder="Allocate amount" />
-                    <CurrencySelect />
-                    <Button type="submit">Allocate</Button>
-                  </form>
+                  {goal.status === "active" ? (
+                    <div className="grid gap-3 xl:grid-cols-[1fr_auto]">
+                      {goal.savedAmountMinor < goal.targetAmountMinor ? (
+                        <ActionForm
+                          action={allocateToGoalFormAction}
+                          className="grid gap-3 sm:grid-cols-[1fr_auto_auto]"
+                        >
+                          <input type="hidden" name="goalId" value={goal.id} />
+                          <Input
+                            name="amount"
+                            inputMode="decimal"
+                            required
+                            placeholder="Allocate amount"
+                          />
+                          <CurrencySelect />
+                          <ActionSubmitButton type="submit" pendingLabel="Allocating...">
+                            Allocate
+                          </ActionSubmitButton>
+                        </ActionForm>
+                      ) : null}
+                      <ActionForm action={completeGoalFormAction} className="grid content-start">
+                        <input type="hidden" name="goalId" value={goal.id} />
+                        <ActionSubmitButton
+                          type="submit"
+                          variant="outline"
+                          disabled={goal.savedAmountMinor < goal.targetAmountMinor}
+                          pendingLabel="Completing..."
+                        >
+                          Complete
+                        </ActionSubmitButton>
+                      </ActionForm>
+                    </div>
+                  ) : null}
                 </CardContent>
               </Card>
             ))
