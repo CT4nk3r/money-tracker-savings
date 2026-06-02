@@ -215,12 +215,17 @@ export async function getUnallocatedBalances(
       .select()
       .from(goalAllocations)
       .where(goalFilter),
-    accountId !== undefined
+    accountId
       ? Promise.resolve([])
       : db
           .select()
           .from(wishlistAllocations)
-      .where(eq(wishlistAllocations.clerkUserId, clerkUserId)),
+          .where(
+            and(
+              eq(wishlistAllocations.clerkUserId, clerkUserId),
+              inArray(wishlistAllocations.status, ["active", "spent"]),
+            ),
+          ),
   ]);
 
   const balances = new Map<string, number>();
@@ -242,6 +247,10 @@ export async function getUnallocatedBalances(
   }
 
   for (const allocation of [...goalFunds, ...wishlistFunds]) {
+    if (allocation.status !== "active" && allocation.status !== "spent") {
+      continue;
+    }
+
     balances.set(
       allocation.sourceCurrency,
       (balances.get(allocation.sourceCurrency) ?? 0) - allocation.sourceAmountMinor,
