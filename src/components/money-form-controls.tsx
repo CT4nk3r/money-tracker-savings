@@ -43,3 +43,31 @@ export function FundingModeSelect({
     </select>
   );
 }
+
+export function AccountScopeSelect({
+  accounts,
+  id,
+  name = "accountId",
+  defaultValue = "",
+}: {
+  accounts: { id: string; name: string }[];
+  id?: string;
+  name?: string;
+  defaultValue?: string;
+}) {
+  return (
+    <select
+      id={id}
+      name={name}
+      defaultValue={defaultValue}
+      className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+    >
+      <option value="">Personal savings</option>
+      {accounts.map((account) => (
+        <option key={account.id} value={account.id}>
+          {account.name}
+        </option>
+      ))}
+    </select>
+  );
+}

@@ -103,7 +103,10 @@ export default async function DashboardPage() {
           </div>
         </div>
         <div className="grid gap-4">
-          <DepositForm defaultFundingMode={data.settings.defaultFundingMode} />
+          <DepositForm
+            accounts={data.accounts}
+            defaultFundingMode={data.settings.defaultFundingMode}
+          />
           <Card>
             <CardHeader>
               <CardTitle>Recent Activity</CardTitle>

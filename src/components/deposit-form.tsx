@@ -3,9 +3,19 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { CurrencySelect, FundingModeSelect } from "@/components/money-form-controls";
+import {
+  AccountScopeSelect,
+  CurrencySelect,
+  FundingModeSelect,
+} from "@/components/money-form-controls";
 
-export function DepositForm({ defaultFundingMode }: { defaultFundingMode: string }) {
+export function DepositForm({
+  accounts,
+  defaultFundingMode,
+}: {
+  accounts: { id: string; name: string }[];
+  defaultFundingMode: string;
+}) {
   return (
     <Card>
       <CardHeader>
@@ -23,6 +33,10 @@ export function DepositForm({ defaultFundingMode }: { defaultFundingMode: string
           <div className="grid gap-2">
             <Label htmlFor="deposit-mode">Wishlist funding</Label>
             <FundingModeSelect defaultValue={defaultFundingMode} />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="deposit-account">Saving space</Label>
+            <AccountScopeSelect id="deposit-account" accounts={accounts} />
           </div>
           <div className="grid gap-2">
             <Label htmlFor="deposit-note">Note</Label>

@@ -45,6 +45,17 @@ export const transactionTypeEnum = pgEnum("transaction_type", [
   "correction",
 ]);
 
+export const accountMemberRoleEnum = pgEnum("account_member_role", [
+  "owner",
+  "member",
+]);
+
+export const accountInviteStatusEnum = pgEnum("account_invite_status", [
+  "pending",
+  "accepted",
+  "revoked",
+]);
+
 const timestamps = {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
@@ -81,11 +92,63 @@ export const exchangeRates = pgTable(
   ],
 );
 
+export const savingsAccounts = pgTable(
+  "savings_accounts",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    name: text("name").notNull(),
+    createdByClerkUserId: text("created_by_clerk_user_id").notNull(),
+    ...timestamps,
+  },
+  (table) => [index("savings_accounts_creator_idx").on(table.createdByClerkUserId)],
+);
+
+export const savingsAccountMembers = pgTable(
+  "savings_account_members",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    accountId: uuid("account_id")
+      .references(() => savingsAccounts.id, { onDelete: "cascade" })
+      .notNull(),
+    clerkUserId: text("clerk_user_id").notNull(),
+    email: text("email"),
+    role: accountMemberRoleEnum("role").default("member").notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    index("account_members_account_idx").on(table.accountId),
+    index("account_members_user_idx").on(table.clerkUserId),
+  ],
+);
+
+export const savingsAccountInvites = pgTable(
+  "savings_account_invites",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    accountId: uuid("account_id")
+      .references(() => savingsAccounts.id, { onDelete: "cascade" })
+      .notNull(),
+    invitedEmail: text("invited_email").notNull(),
+    invitedByClerkUserId: text("invited_by_clerk_user_id").notNull(),
+    acceptedByClerkUserId: text("accepted_by_clerk_user_id"),
+    status: accountInviteStatusEnum("status").default("pending").notNull(),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    index("account_invites_account_idx").on(table.accountId),
+    index("account_invites_email_idx").on(table.invitedEmail, table.status),
+  ],
+);
+
 export const goals = pgTable(
   "goals",
   {
     id: uuid("id").defaultRandom().primaryKey(),
     clerkUserId: text("clerk_user_id").notNull(),
+    accountId: uuid("account_id").references(() => savingsAccounts.id, {
+      onDelete: "cascade",
+    }),
     name: text("name").notNull(),
     targetAmountMinor: bigint("target_amount_minor", { mode: "number" }).notNull(),
     currency: text("currency").notNull(),
@@ -94,7 +157,10 @@ export const goals = pgTable(
     notes: text("notes"),
     ...timestamps,
   },
-  (table) => [index("goals_user_idx").on(table.clerkUserId)],
+  (table) => [
+    index("goals_user_idx").on(table.clerkUserId),
+    index("goals_account_idx").on(table.accountId),
+  ],
 );
 
 export const wishlistItems = pgTable(
@@ -121,6 +187,9 @@ export const savingsTransactions = pgTable(
   {
     id: uuid("id").defaultRandom().primaryKey(),
     clerkUserId: text("clerk_user_id").notNull(),
+    accountId: uuid("account_id").references(() => savingsAccounts.id, {
+      onDelete: "cascade",
+    }),
     type: transactionTypeEnum("type").notNull(),
     amountMinor: bigint("amount_minor", { mode: "number" }).notNull(),
     currency: text("currency").notNull(),
@@ -131,7 +200,10 @@ export const savingsTransactions = pgTable(
     note: text("note"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
-  (table) => [index("transactions_user_idx").on(table.clerkUserId, table.createdAt)],
+  (table) => [
+    index("transactions_user_idx").on(table.clerkUserId, table.createdAt),
+    index("transactions_account_idx").on(table.accountId, table.createdAt),
+  ],
 );
 
 export const goalAllocations = pgTable(
@@ -139,6 +211,9 @@ export const goalAllocations = pgTable(
   {
     id: uuid("id").defaultRandom().primaryKey(),
     clerkUserId: text("clerk_user_id").notNull(),
+    accountId: uuid("account_id").references(() => savingsAccounts.id, {
+      onDelete: "cascade",
+    }),
     goalId: uuid("goal_id")
       .references(() => goals.id, { onDelete: "cascade" })
       .notNull(),
@@ -152,7 +227,10 @@ export const goalAllocations = pgTable(
     status: allocationStatusEnum("status").default("active").notNull(),
     ...timestamps,
   },
-  (table) => [index("goal_allocations_user_idx").on(table.clerkUserId, table.goalId)],
+  (table) => [
+    index("goal_allocations_user_idx").on(table.clerkUserId, table.goalId),
+    index("goal_allocations_account_idx").on(table.accountId, table.goalId),
+  ],
 );
 
 export const wishlistAllocations = pgTable(

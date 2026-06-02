@@ -2,11 +2,15 @@
 
 import { revalidatePath } from "next/cache";
 import { and, eq } from "drizzle-orm";
+import { currentUser } from "@clerk/nextjs/server";
 import { z } from "zod";
 import { getDb } from "@/db";
 import {
   goalAllocations,
   goals,
+  savingsAccountInvites,
+  savingsAccountMembers,
+  savingsAccounts,
   savingsTransactions,
   userSettings,
   wishlistAllocations,
@@ -15,6 +19,7 @@ import {
 import { isCurrencyCode } from "@/lib/currencies";
 import {
   assertGoalOwner,
+  assertSavingsAccountMember,
   assertWishlistOwner,
   getActiveWishlistFundingCandidates,
   getOrCreateSettings,
@@ -28,6 +33,7 @@ import { planWishlistFunding } from "@/lib/wishlist-planner";
 
 const currencySchema = z.string().refine(isCurrencyCode, "Unsupported currency.");
 const fundingModeSchema = z.enum(["manual", "top_first", "weighted_split"]);
+const emailSchema = z.email().transform((email) => email.toLowerCase());
 
 function stringValue(formData: FormData, key: string) {
   return String(formData.get(key) ?? "").trim();
@@ -38,6 +44,10 @@ function revalidateApp() {
   revalidatePath("/goals");
   revalidatePath("/wishlist");
   revalidatePath("/settings");
+}
+
+function optionalAccountId(formData: FormData) {
+  return stringValue(formData, "accountId") || null;
 }
 
 async function createWishlistAllocation(
@@ -92,8 +102,9 @@ async function assertEnoughUnallocated(
   clerkUserId: string,
   currency: string,
   requestedAmountMinor: number,
+  accountId: string | null = null,
 ) {
-  const balances = await getUnallocatedBalances(clerkUserId);
+  const balances = await getUnallocatedBalances(clerkUserId, accountId);
   const available = balances.find((balance) => balance.currency === currency)?.amountMinor ?? 0;
 
   if (available < requestedAmountMinor) {
@@ -110,19 +121,25 @@ export async function createDeposit(formData: FormData) {
   const currency = currencySchema.parse(stringValue(formData, "currency"));
   const amountMinor = parseAmountToMinor(stringValue(formData, "amount"), currency);
   const rawMode = stringValue(formData, "fundingMode");
+  const accountId = optionalAccountId(formData);
   const settings = await getOrCreateSettings(clerkUserId);
   const fundingMode = fundingModeSchema.parse(rawMode || settings.defaultFundingMode);
   const db = getDb();
 
+  if (accountId) {
+    await assertSavingsAccountMember(clerkUserId, accountId);
+  }
+
   await db.insert(savingsTransactions).values({
     clerkUserId,
+    accountId,
     type: "deposit",
     amountMinor,
     currency,
     note: stringValue(formData, "note") || null,
   });
 
-  if (fundingMode !== "manual") {
+  if (fundingMode !== "manual" && !accountId) {
     const candidates = await getActiveWishlistFundingCandidates(clerkUserId);
     const candidatesInSource = [];
 
@@ -157,9 +174,15 @@ export async function createDeposit(formData: FormData) {
 export async function createGoal(formData: FormData) {
   const clerkUserId = await requireUserId();
   const currency = currencySchema.parse(stringValue(formData, "currency"));
+  const accountId = optionalAccountId(formData);
+
+  if (accountId) {
+    await assertSavingsAccountMember(clerkUserId, accountId);
+  }
 
   await getDb().insert(goals).values({
     clerkUserId,
+    accountId,
     name: stringValue(formData, "name"),
     targetAmountMinor: parseAmountToMinor(stringValue(formData, "targetAmount"), currency),
     currency,
@@ -175,11 +198,12 @@ export async function allocateToGoal(formData: FormData) {
   const currency = currencySchema.parse(stringValue(formData, "currency"));
   const sourceAmountMinor = parseAmountToMinor(stringValue(formData, "amount"), currency);
   const goal = await assertGoalOwner(clerkUserId, goalId);
-  await assertEnoughUnallocated(clerkUserId, currency, sourceAmountMinor);
+  await assertEnoughUnallocated(clerkUserId, currency, sourceAmountMinor, goal.accountId);
   const converted = await convertWithRateSnapshot(sourceAmountMinor, currency, goal.currency);
 
   await getDb().insert(goalAllocations).values({
     clerkUserId,
+    accountId: goal.accountId,
     goalId,
     sourceAmountMinor,
     sourceCurrency: currency,
@@ -190,6 +214,7 @@ export async function allocateToGoal(formData: FormData) {
 
   await getDb().insert(savingsTransactions).values({
     clerkUserId,
+    accountId: goal.accountId,
     type: "goal_allocation",
     amountMinor: sourceAmountMinor,
     currency,
@@ -360,6 +385,80 @@ export async function updateSettings(formData: FormData) {
       target: userSettings.clerkUserId,
       set: { displayCurrency, defaultFundingMode, updatedAt: new Date() },
     });
+
+  revalidateApp();
+}
+
+export async function createSavingsAccount(formData: FormData) {
+  const clerkUserId = await requireUserId();
+  const user = await currentUser();
+  const name = stringValue(formData, "name");
+  const invitedEmail = emailSchema.parse(stringValue(formData, "invitedEmail"));
+
+  if (!name) {
+    throw new Error("Account name is required.");
+  }
+
+  const db = getDb();
+  const [account] = await db
+    .insert(savingsAccounts)
+    .values({ name, createdByClerkUserId: clerkUserId })
+    .returning();
+
+  const primaryEmail =
+    user?.emailAddresses.find((email) => email.id === user.primaryEmailAddressId)
+      ?.emailAddress ?? user?.emailAddresses[0]?.emailAddress;
+
+  await db.insert(savingsAccountMembers).values({
+    accountId: account.id,
+    clerkUserId,
+    email: primaryEmail?.toLowerCase() ?? null,
+    role: "owner",
+  });
+
+  await db.insert(savingsAccountInvites).values({
+    accountId: account.id,
+    invitedEmail,
+    invitedByClerkUserId: clerkUserId,
+  });
+
+  revalidateApp();
+}
+
+export async function acceptSavingsAccountInvite(formData: FormData) {
+  const clerkUserId = await requireUserId();
+  const user = await currentUser();
+  const inviteId = stringValue(formData, "inviteId");
+  const emails =
+    user?.emailAddresses.map((email) => email.emailAddress.toLowerCase()) ?? [];
+
+  const db = getDb();
+  const [invite] = await db
+    .select()
+    .from(savingsAccountInvites)
+    .where(and(eq(savingsAccountInvites.id, inviteId), eq(savingsAccountInvites.status, "pending")))
+    .limit(1);
+
+  if (!invite || !emails.includes(invite.invitedEmail)) {
+    throw new Error("Invite not found for this account.");
+  }
+
+  await db.insert(savingsAccountMembers).values({
+    accountId: invite.accountId,
+    clerkUserId,
+    email: invite.invitedEmail,
+    role: "member",
+  });
+
+  await db
+    .update(savingsAccountInvites)
+    .set({
+      status: "accepted",
+      acceptedByClerkUserId: clerkUserId,
+      acceptedAt: new Date(),
+      updatedAt: new Date(),
+    })
+    .where(eq(savingsAccountInvites.id, invite.id));
 
   revalidateApp();
 }
