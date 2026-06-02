@@ -40,6 +40,10 @@ export async function getOrCreateSettings(clerkUserId: string) {
   const [created] = await db
     .insert(userSettings)
     .values({ clerkUserId })
+    .onConflictDoUpdate({
+      target: userSettings.clerkUserId,
+      set: { updatedAt: new Date() },
+    })
     .returning();
 
   return created;
