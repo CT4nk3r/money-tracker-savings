@@ -2,6 +2,7 @@
 
 import { randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
+import { unstable_rethrow } from "next/navigation";
 import { and, eq } from "drizzle-orm";
 import { currentUser } from "@clerk/nextjs/server";
 import { z } from "zod";
@@ -41,6 +42,10 @@ const fundingModeSchema = z.enum(["manual", "top_first", "weighted_split"]);
 const emailSchema = z.email().transform((email) => email.toLowerCase());
 const accountIdSchema = z.uuid();
 
+export type ActionFormState = {
+  error: string | null;
+};
+
 function stringValue(formData: FormData, key: string) {
   return String(formData.get(key) ?? "").trim();
 }
@@ -57,6 +62,27 @@ function optionalAccountId(formData: FormData) {
   return accountId ? accountIdSchema.parse(accountId) : null;
 }
 
+function getActionErrorMessage(error: unknown) {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return "Something went wrong. Try again.";
+}
+
+async function toActionFormState(
+  action: (formData: FormData) => Promise<void>,
+  formData: FormData,
+): Promise<ActionFormState> {
+  try {
+    await action(formData);
+    return { error: null };
+  } catch (error) {
+    unstable_rethrow(error);
+    return { error: getActionErrorMessage(error) };
+  }
+}
+
 async function createWishlistAllocation(
   clerkUserId: string,
   wishlistItemId: string,
@@ -71,6 +97,16 @@ async function createWishlistAllocation(
     sourceCurrency,
     item.currency,
   );
+  const allocations = await getWishlistAllocationsForItem(clerkUserId, wishlistItemId);
+  const savedAmountMinor = allocations.reduce(
+    (sum, allocation) => sum + allocation.targetAmountMinor,
+    0,
+  );
+  const neededAmountMinor = Math.max(0, item.currentPriceMinor - savedAmountMinor);
+
+  if (neededAmountMinor <= 0 || converted.amountMinor > neededAmountMinor) {
+    throw new Error("That amount is more than this wishlist item still needs.");
+  }
 
   await db.insert(wishlistAllocations).values({
     clerkUserId,
@@ -91,18 +127,27 @@ async function createWishlistAllocation(
     note: `Allocated to ${item.title}`,
   });
 
-  const allocations = await getWishlistAllocationsForItem(clerkUserId, wishlistItemId);
-  const savedAmountMinor = allocations.reduce(
-    (sum, allocation) => sum + allocation.targetAmountMinor,
-    0,
-  );
+  const nextSavedAmountMinor = savedAmountMinor + converted.amountMinor;
 
-  if (savedAmountMinor >= item.currentPriceMinor && item.status === "active") {
+  if (nextSavedAmountMinor >= item.currentPriceMinor && item.status === "active") {
     await db
       .update(wishlistItems)
       .set({ status: "ready", updatedAt: new Date() })
       .where(eqWishlistItem(clerkUserId, wishlistItemId));
   }
+}
+
+async function getActiveGoalAllocations(goalId: string) {
+  return getDb()
+    .select()
+    .from(goalAllocations)
+    .where(and(eq(goalAllocations.goalId, goalId), eq(goalAllocations.status, "active")));
+}
+
+function totalTargetAmount(
+  allocations: { targetAmountMinor: number }[],
+) {
+  return allocations.reduce((sum, allocation) => sum + allocation.targetAmountMinor, 0);
 }
 
 async function assertEnoughUnallocated(
@@ -178,6 +223,40 @@ export async function createDeposit(formData: FormData) {
   revalidateApp();
 }
 
+export async function createDepositFormAction(
+  _state: ActionFormState,
+  formData: FormData,
+) {
+  return toActionFormState(createDeposit, formData);
+}
+
+export async function withdrawSavings(formData: FormData) {
+  const clerkUserId = await requireUserId();
+  const currency = currencySchema.parse(stringValue(formData, "currency"));
+  const amountMinor = parseAmountToMinor(stringValue(formData, "amount"), currency);
+  const accountId = optionalAccountId(formData);
+
+  await assertEnoughUnallocated(clerkUserId, currency, amountMinor, accountId);
+
+  await getDb().insert(savingsTransactions).values({
+    clerkUserId,
+    accountId,
+    type: "withdrawal",
+    amountMinor,
+    currency,
+    note: stringValue(formData, "note") || null,
+  });
+
+  revalidateApp();
+}
+
+export async function withdrawSavingsFormAction(
+  _state: ActionFormState,
+  formData: FormData,
+) {
+  return toActionFormState(withdrawSavings, formData);
+}
+
 export async function createGoal(formData: FormData) {
   const clerkUserId = await requireUserId();
   const currency = currencySchema.parse(stringValue(formData, "currency"));
@@ -199,6 +278,10 @@ export async function createGoal(formData: FormData) {
   revalidateApp();
 }
 
+export async function createGoalFormAction(_state: ActionFormState, formData: FormData) {
+  return toActionFormState(createGoal, formData);
+}
+
 export async function allocateToGoal(formData: FormData) {
   const clerkUserId = await requireUserId();
   const goalId = stringValue(formData, "goalId");
@@ -207,6 +290,13 @@ export async function allocateToGoal(formData: FormData) {
   const goal = await assertGoalOwner(clerkUserId, goalId);
   await assertEnoughUnallocated(clerkUserId, currency, sourceAmountMinor, goal.accountId);
   const converted = await convertWithRateSnapshot(sourceAmountMinor, currency, goal.currency);
+  const allocations = await getActiveGoalAllocations(goalId);
+  const savedAmountMinor = totalTargetAmount(allocations);
+  const neededAmountMinor = Math.max(0, goal.targetAmountMinor - savedAmountMinor);
+
+  if (neededAmountMinor <= 0 || converted.amountMinor > neededAmountMinor) {
+    throw new Error("That amount is more than this goal still needs.");
+  }
 
   await getDb().insert(goalAllocations).values({
     clerkUserId,
@@ -232,6 +322,59 @@ export async function allocateToGoal(formData: FormData) {
   revalidateApp();
 }
 
+export async function allocateToGoalFormAction(
+  _state: ActionFormState,
+  formData: FormData,
+) {
+  return toActionFormState(allocateToGoal, formData);
+}
+
+export async function completeGoal(formData: FormData) {
+  const clerkUserId = await requireUserId();
+  const goalId = stringValue(formData, "goalId");
+  const goal = await assertGoalOwner(clerkUserId, goalId);
+  const allocations = await getActiveGoalAllocations(goalId);
+  const savedAmountMinor = totalTargetAmount(allocations);
+  const db = getDb();
+
+  if (goal.status === "completed") {
+    throw new Error("This goal is already completed.");
+  }
+
+  if (savedAmountMinor < goal.targetAmountMinor) {
+    throw new Error("Finish funding this goal before completing it.");
+  }
+
+  await db.batch([
+    db
+      .update(goalAllocations)
+      .set({ status: "spent", updatedAt: new Date() })
+      .where(and(eq(goalAllocations.goalId, goalId), eq(goalAllocations.status, "active"))),
+    db
+      .update(goals)
+      .set({ status: "completed", updatedAt: new Date() })
+      .where(eq(goals.id, goalId)),
+    db.insert(savingsTransactions).values({
+      clerkUserId,
+      accountId: goal.accountId,
+      type: "goal_completion",
+      amountMinor: savedAmountMinor,
+      currency: goal.currency,
+      goalId,
+      note: `Completed ${goal.name}`,
+    }),
+  ]);
+
+  revalidateApp();
+}
+
+export async function completeGoalFormAction(
+  _state: ActionFormState,
+  formData: FormData,
+) {
+  return toActionFormState(completeGoal, formData);
+}
+
 export async function createWishlistItem(formData: FormData) {
   const clerkUserId = await requireUserId();
   const currency = currencySchema.parse(stringValue(formData, "currency"));
@@ -254,6 +397,13 @@ export async function createWishlistItem(formData: FormData) {
   revalidateApp();
 }
 
+export async function createWishlistItemFormAction(
+  _state: ActionFormState,
+  formData: FormData,
+) {
+  return toActionFormState(createWishlistItem, formData);
+}
+
 export async function allocateToWishlist(formData: FormData) {
   const clerkUserId = await requireUserId();
   const currency = currencySchema.parse(stringValue(formData, "currency"));
@@ -267,6 +417,13 @@ export async function allocateToWishlist(formData: FormData) {
   );
 
   revalidateApp();
+}
+
+export async function allocateToWishlistFormAction(
+  _state: ActionFormState,
+  formData: FormData,
+) {
+  return toActionFormState(allocateToWishlist, formData);
 }
 
 export async function updateWishlistPrice(formData: FormData) {
@@ -336,6 +493,13 @@ export async function updateWishlistPrice(formData: FormData) {
   revalidateApp();
 }
 
+export async function updateWishlistPriceFormAction(
+  _state: ActionFormState,
+  formData: FormData,
+) {
+  return toActionFormState(updateWishlistPrice, formData);
+}
+
 function eqWishlistAllocation(clerkUserId: string, allocationId: string) {
   return and(
     eq(wishlistAllocations.clerkUserId, clerkUserId),
@@ -347,34 +511,52 @@ export async function purchaseWishlistItem(formData: FormData) {
   const clerkUserId = await requireUserId();
   const wishlistItemId = stringValue(formData, "wishlistItemId");
   const item = await assertWishlistOwner(clerkUserId, wishlistItemId);
+  const allocations = await getWishlistAllocationsForItem(clerkUserId, wishlistItemId);
+  const savedAmountMinor = totalTargetAmount(allocations);
   const db = getDb();
 
-  await db
-    .update(wishlistAllocations)
-    .set({ status: "spent", updatedAt: new Date() })
-    .where(eqWishlistItemAllocations(clerkUserId, wishlistItemId));
+  if (item.status === "purchased") {
+    throw new Error("This wishlist item is already purchased.");
+  }
 
-  await db
-    .update(wishlistItems)
-    .set({ status: "purchased", purchasedAt: new Date(), updatedAt: new Date() })
-    .where(eqWishlistItem(clerkUserId, wishlistItemId));
+  if (savedAmountMinor < item.currentPriceMinor) {
+    throw new Error("Finish funding this wishlist item before purchasing it.");
+  }
 
-  await db.insert(savingsTransactions).values({
-    clerkUserId,
-    type: "purchase",
-    amountMinor: item.currentPriceMinor,
-    currency: item.currency,
-    wishlistItemId,
-    note: `Purchased ${item.title}`,
-  });
+  await db.batch([
+    db
+      .update(wishlistAllocations)
+      .set({ status: "spent", updatedAt: new Date() })
+      .where(eqWishlistItemAllocations(clerkUserId, wishlistItemId)),
+    db
+      .update(wishlistItems)
+      .set({ status: "purchased", purchasedAt: new Date(), updatedAt: new Date() })
+      .where(eqWishlistItem(clerkUserId, wishlistItemId)),
+    db.insert(savingsTransactions).values({
+      clerkUserId,
+      type: "purchase",
+      amountMinor: savedAmountMinor,
+      currency: item.currency,
+      wishlistItemId,
+      note: `Purchased ${item.title}`,
+    }),
+  ]);
 
   revalidateApp();
+}
+
+export async function purchaseWishlistItemFormAction(
+  _state: ActionFormState,
+  formData: FormData,
+) {
+  return toActionFormState(purchaseWishlistItem, formData);
 }
 
 function eqWishlistItemAllocations(clerkUserId: string, wishlistItemId: string) {
   return and(
     eq(wishlistAllocations.clerkUserId, clerkUserId),
     eq(wishlistAllocations.wishlistItemId, wishlistItemId),
+    eq(wishlistAllocations.status, "active"),
   );
 }
 
@@ -440,6 +622,13 @@ export async function createSavingsAccount(formData: FormData) {
   revalidateApp();
 }
 
+export async function createSavingsAccountFormAction(
+  _state: ActionFormState,
+  formData: FormData,
+) {
+  return toActionFormState(createSavingsAccount, formData);
+}
+
 export async function acceptSavingsAccountInvite(formData: FormData) {
   const clerkUserId = await requireUserId();
   const user = await currentUser();
@@ -479,4 +668,11 @@ export async function acceptSavingsAccountInvite(formData: FormData) {
   ]);
 
   revalidateApp();
+}
+
+export async function acceptSavingsAccountInviteFormAction(
+  _state: ActionFormState,
+  formData: FormData,
+) {
+  return toActionFormState(acceptSavingsAccountInvite, formData);
 }

@@ -1,8 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { createDeposit } from "@/app/actions";
-import { Button } from "@/components/ui/button";
+import { createDepositFormAction } from "@/app/actions";
+import { ActionForm, ActionSubmitButton } from "@/components/action-form";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -28,7 +28,7 @@ export function DepositForm({
         <CardTitle>Set Money Aside</CardTitle>
       </CardHeader>
       <CardContent>
-        <form action={createDeposit} className="grid gap-4">
+        <ActionForm action={createDepositFormAction} className="grid gap-4">
           <div className="grid gap-2">
             <Label htmlFor="deposit-amount">Amount</Label>
             <div className="grid grid-cols-[1fr_auto] gap-2">
@@ -65,8 +65,10 @@ export function DepositForm({
             <Label htmlFor="deposit-note">Note</Label>
             <Input id="deposit-note" name="note" placeholder="Salary, cash envelope, bonus" />
           </div>
-          <Button type="submit">Add savings</Button>
-        </form>
+          <ActionSubmitButton type="submit" pendingLabel="Adding...">
+            Add savings
+          </ActionSubmitButton>
+        </ActionForm>
       </CardContent>
     </Card>
   );

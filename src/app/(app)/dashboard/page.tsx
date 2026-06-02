@@ -1,5 +1,6 @@
 import { DepositForm } from "@/components/deposit-form";
 import { ProgressSummary } from "@/components/progress-summary";
+import { WithdrawalForm } from "@/components/withdrawal-form";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
@@ -129,6 +130,7 @@ export default async function DashboardPage() {
             accounts={data.accounts}
             defaultFundingMode={data.settings.defaultFundingMode}
           />
+          <WithdrawalForm accounts={data.accounts} />
           <Card>
             <CardHeader>
               <CardTitle>Recent Activity</CardTitle>

@@ -40,6 +40,10 @@ export async function getOrCreateSettings(clerkUserId: string) {
   const [created] = await db
     .insert(userSettings)
     .values({ clerkUserId })
+    .onConflictDoUpdate({
+      target: userSettings.clerkUserId,
+      set: { updatedAt: new Date() },
+    })
     .returning();
 
   return created;
@@ -151,7 +155,7 @@ export async function getGoalsView(clerkUserId: string) {
   return items.map((goal) => ({
     ...goal,
     savedAmountMinor: allocations
-      .filter((allocation) => allocation.goalId === goal.id && allocation.status !== "released")
+      .filter((allocation) => allocation.goalId === goal.id && allocation.status === "active")
       .reduce((sum, allocation) => sum + allocation.targetAmountMinor, 0),
   }));
 }
@@ -175,7 +179,7 @@ export async function getWishlistView(clerkUserId: string) {
     savedAmountMinor: allocations
       .filter(
         (allocation) =>
-          allocation.wishlistItemId === item.id && allocation.status !== "released",
+          allocation.wishlistItemId === item.id && allocation.status === "active",
       )
       .reduce((sum, allocation) => sum + allocation.targetAmountMinor, 0),
   }));
@@ -211,28 +215,42 @@ export async function getUnallocatedBalances(
       .select()
       .from(goalAllocations)
       .where(goalFilter),
-    accountId !== undefined
+    accountId
       ? Promise.resolve([])
       : db
           .select()
           .from(wishlistAllocations)
-      .where(eq(wishlistAllocations.clerkUserId, clerkUserId)),
+          .where(
+            and(
+              eq(wishlistAllocations.clerkUserId, clerkUserId),
+              inArray(wishlistAllocations.status, ["active", "spent"]),
+            ),
+          ),
   ]);
 
   const balances = new Map<string, number>();
 
   for (const transaction of transactions) {
-    if (transaction.type !== "deposit" && transaction.type !== "release") {
+    if (
+      transaction.type !== "deposit" &&
+      transaction.type !== "release" &&
+      transaction.type !== "withdrawal"
+    ) {
       continue;
     }
 
     balances.set(
       transaction.currency,
-      (balances.get(transaction.currency) ?? 0) + transaction.amountMinor,
+      (balances.get(transaction.currency) ?? 0) +
+        (transaction.type === "withdrawal" ? -transaction.amountMinor : transaction.amountMinor),
     );
   }
 
   for (const allocation of [...goalFunds, ...wishlistFunds]) {
+    if (allocation.status !== "active" && allocation.status !== "spent") {
+      continue;
+    }
+
     balances.set(
       allocation.sourceCurrency,
       (balances.get(allocation.sourceCurrency) ?? 0) - allocation.sourceAmountMinor,
@@ -363,7 +381,7 @@ export async function getWishlistAllocationsForItem(
       and(
         eq(wishlistAllocations.clerkUserId, clerkUserId),
         eq(wishlistAllocations.wishlistItemId, wishlistItemId),
-        inArray(wishlistAllocations.status, ["active", "spent"]),
+        eq(wishlistAllocations.status, "active"),
       ),
     )
     .orderBy(desc(wishlistAllocations.createdAt));

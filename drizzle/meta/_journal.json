@@ -22,6 +22,13 @@
       "when": 1780421843709,
       "tag": "0002_nervous_dragon_man",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1780432186537,
+      "tag": "0003_minor_major_mapleleaf",
+      "breakpoints": true
     }
   ]
 }

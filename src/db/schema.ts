@@ -44,6 +44,8 @@ export const transactionTypeEnum = pgEnum("transaction_type", [
   "wishlist_allocation",
   "release",
   "purchase",
+  "goal_completion",
+  "withdrawal",
   "correction",
 ]);
 
