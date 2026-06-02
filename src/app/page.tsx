@@ -1,6 +1,6 @@
-import { SignInButton, SignUpButton } from "@clerk/nextjs";
 import { auth } from "@clerk/nextjs/server";
 import { ArrowRight, Banknote, Goal, ListOrdered } from "lucide-react";
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -33,17 +33,17 @@ export default async function Home() {
             </p>
           </div>
           <div className="flex flex-col gap-3 sm:flex-row">
-            <SignUpButton>
-              <Button size="lg">
+            <Button size="lg" asChild>
+              <Link href="/sign-up">
                 Create account
                 <ArrowRight className="size-4" aria-hidden />
-              </Button>
-            </SignUpButton>
-            <SignInButton>
-              <Button size="lg" variant="outline">
+              </Link>
+            </Button>
+            <Button size="lg" variant="outline" asChild>
+              <Link href="/sign-in">
                 Sign in
-              </Button>
-            </SignInButton>
+              </Link>
+            </Button>
           </div>
         </div>
         <Card className="border-primary/20 bg-card/80">
